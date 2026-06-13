@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>雙維度反重力恐龍</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #ffffff;
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+            user-select: none;
+        }
+        #game-container {
+            position: relative;
+        }
+        canvas {
+            display: block;
+        }
+        .instructions {
+            margin-top: 20px;
+            text-align: center;
+            color: #333;
+            font-size: 14px;
+        }
+        .key {
+            background: #eee;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: bold;
+            border: 1px solid #ccc;
+        }
+        #game-over {
+            display: none;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 20px;
+            font-weight: bold;
+            color: #535353;
+            text-align: center;
+            background: rgba(255,255,255,0.8);
+            padding: 20px;
+            border-radius: 8px;
+        }
+        button {
+            margin-top: 10px;
+            padding: 5px 15px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <canvas id="gameCanvas" width="800" height="400"></canvas>
+        <div id="game-over">
+            G A M E   O V E R
+            <br>
+            <button onclick="resetGame()">重新開始</button>
+        </div>
+    </div>
+
+    <div class="instructions">
+        操作方法：【<span class="key">Space 空白鍵</span> / <span class="key">↑</span>】跳躍  |  【<span class="key">↓ 往下鍵</span>】上下翻轉
+    </div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const gameOverScreen = document.getElementById('game-over');
+
+    // 中央 X 軸位置
+    const AXIS_Y = canvas.height / 2; 
+    const LINE_WIDTH = 2; // 全局線條粗細
+    const GRAVITY = 0.5;
+    const JUMP_FORCE = 9.5;
+
+    let score = 0;
+    let gameSpeed = 6;
+    let isGameOver = false;
+    let obstacles = [];
+    let spawnTimer = 0;
+
+    // 小恐龍
+    const dino = {
+        x: 80,
+        y: AXIS_Y - 40,
+        width: 26,
+        height: 40,
+        vy: 0,
+        isJumping: false,
+        isBelowAxis: false,
+
+        update() {
+            this.y += this.vy;
+
+            if (!this.isBelowAxis) {
+                this.vy += GRAVITY;
+                if (this.y >= AXIS_Y - this.height) {
+                    this.y = AXIS_Y - this.height;
+                    this.vy = 0;
+                    this.isJumping = false;
+                }
+            } else {
+                this.vy -= GRAVITY;
+                if (this.y <= AXIS_Y) {
+                    this.y = AXIS_Y;
+                    this.vy = 0;
+                    this.isJumping = false;
+                }
+            }
+        },
+
+        jump() {
+            if (this.isJumping) return;
+            this.vy = this.isBelowAxis ? JUMP_FORCE : -JUMP_FORCE;
+            this.isJumping = true;
+        },
+
+        flip() {
+            this.isBelowAxis = !this.isBelowAxis;
+            if (!this.isBelowAxis) {
+                this.y = AXIS_Y - this.height;
+            } else {
+                this.y = AXIS_Y;
+            }
+            this.vy = 0;
+            this.isJumping = false;
+        },
+
+        draw() {
+            ctx.save();
+            ctx.fillStyle = '#333333';
+            
+            if (!this.isBelowAxis) {
+                ctx.fillRect(this.x, this.y, this.width, this.height);
+                ctx.fillStyle = '#fff';
+                ctx.fillRect(this.x + 16, this.y + 8, 3, 3);
+            } else {
+                ctx.fillRect(this.x, this.y, this.width, this.height);
+                ctx.fillStyle = '#fff';
+                ctx.fillRect(this.x + 16, this.y + this.height - 11, 3, 3);
+            }
+            ctx.restore();
+        }
+    };
+
+    // 仙人掌
+    class Obstacle {
+        constructor() {
+            this.x = canvas.width;
+            this.width = 15 + Math.random() * 15;
+            this.height = 30 + Math.random() * 25;
+            this.isBelowAxis = Math.random() < 0.5;
+
+            if (!this.isBelowAxis) {
+                this.y = AXIS_Y - this.height;
+            } else {
+                this.y = AXIS_Y;
+            }
+        }
+
+        update() {
+            this.x -= gameSpeed;
+        }
+
+        draw() {
+            ctx.save();
+            ctx.fillStyle = '#333333';
+            
+            if (!this.isBelowAxis) {
+                // 向上長
+                ctx.fillRect(this.x + this.width/3, this.y, this.width/3, this.height);
+                ctx.fillRect(this.x, this.y + this.height/3, this.width, LINE_WIDTH * 2);
+                ctx.fillRect(this.x, this.y, LINE_WIDTH * 2, this.height/3);
+                ctx.fillRect(this.x + this.width - LINE_WIDTH * 2, this.y + 10, LINE_WIDTH * 2, this.height/3);
+            } else {
+                // 向下長
+                ctx.fillRect(this.x + this.width/3, this.y, this.width/3, this.height);
+                ctx.fillRect(this.x, this.y + this.height*0.4, this.width, LINE_WIDTH * 2);
+                ctx.fillRect(this.x, this.y + this.height*0.4, LINE_WIDTH * 2, this.height/2);
+                ctx.fillRect(this.x + this.width - LINE_WIDTH * 2, this.y + this.height*0.4, LINE_WIDTH * 2, this.height/2);
+            }
+            ctx.restore();
+        }
+    }
+
+    // 鍵盤事件
+    window.addEventListener('keydown', (e) => {
+        if (isGameOver) return;
+        if (e.code === 'Space' || e.code === 'ArrowUp') {
+            e.preventDefault();
+            dino.jump();
+        }
+        if (e.code === 'ArrowDown') {
+            e.preventDefault();
+            dino.flip();
+        }
+    });
+
+    function checkCollision(rect1, rect2) {
+        return rect1.x < rect2.x + rect2.width &&
+               rect1.x + rect1.width > rect2.x &&
+               rect1.y < rect2.y + rect2.height &&
+               rect1.y + rect1.height > rect2.y;
+    }
+
+    function resetGame() {
+        score = 0;
+        gameSpeed = 6;
+        isGameOver = false;
+        obstacles = [];
+        spawnTimer = 0;
+        dino.isBelowAxis = false;
+        dino.y = AXIS_Y - dino.height;
+        dino.vy = 0;
+        gameOverScreen.style.display = 'none';
+        loop();
+    }
+
+    function loop() {
+        if (isGameOver) return;
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // 1. 繪製右側的 X 軸與箭頭
+        ctx.save();
+        ctx.strokeStyle = '#333333';
+        ctx.lineWidth = LINE_WIDTH;
+        
+        ctx.beginPath();
+        ctx.moveTo(0, AXIS_Y);
+        ctx.lineTo(canvas.width - 40, AXIS_Y);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(canvas.width - 55, AXIS_Y - 8);
+        ctx.lineTo(canvas.width - 40, AXIS_Y);
+        ctx.lineTo(canvas.width - 55, AXIS_Y + 8);
+        ctx.stroke();
+
+        ctx.fillStyle = '#333333';
+        ctx.font = 'bold 20px sans-serif';
+        ctx.fillText('x', canvas.width - 25, AXIS_Y + 7);
+        ctx.restore();
+
+        // 2. 更新與繪製小恐龍
+        dino.update();
+        dino.draw();
+
+        // 3. 障礙物管理
+        spawnTimer++;
+        if (spawnTimer > 80) {
+            obstacles.push(new Obstacle());
+            spawnTimer = 0;
+        }
+
+        for (let i = obstacles.length - 1; i >= 0; i--) {
+            let obs = obstacles[i];
+            obs.update();
+            obs.draw();
+
+            if (checkCollision(dino, obs)) {
+                isGameOver = true;
+                gameOverScreen.style.display = 'block';
+            }
+
+            if (obs.x + obs.width < 0) {
+                obstacles.splice(i, 1);
+                score++;
+                if (score % 5 === 0) gameSpeed += 0.5;
+            }
+        }
+
+        // 4. 右上角計分板（置右對齊，完美留空）
+        ctx.save();
+        ctx.fillStyle = '#333333';
+        ctx.font = 'bold 18px monospace';
+        ctx.textAlign = 'right';
+        // 將分數補足 5 位數，顯示在距離右側邊緣 20px、上方 35px 的地方
+        ctx.fillText(`SCORE: ${String(score).padStart(5, '0')}`, canvas.width - 20, 35);
+        ctx.restore();
+
+        requestAnimationFrame(loop);
+    }
+
+    resetGame();
+</script>
+</body>
+</html>
